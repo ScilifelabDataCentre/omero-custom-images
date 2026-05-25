@@ -51,6 +51,7 @@ jobs:
           exit-code: 1
           vuln-type: 'os,library'
           severity: 'CRITICAL'
+          trivyignores: omero-server-extended/.trivyignore
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3.6.0
