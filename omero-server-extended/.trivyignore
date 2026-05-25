@@ -1,0 +1,5 @@
+# Spring vulnerabilities in base OMERO JARs; not actionable here
+# Consider VEX for formal justification if needed.
+CVE-2022-22965
+CVE-2022-22978
+
