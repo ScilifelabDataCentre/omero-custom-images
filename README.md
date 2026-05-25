@@ -27,10 +27,10 @@ docker build -t omero-nfs-export omero-nfs-export/
 
 ## CI/CD
 
-Each image has its own GitHub Actions workflow:
+Each image has its own GitHub Actions workflow, triggered manually via `workflow_dispatch` from the GitHub Actions UI or CLI. When triggered, you provide a version tag (e.g. `v1.0.0`) and the workflow builds, pushes, scans (Trivy), and signs (cosign) the image.
 
-- **omero-server-extended** -- built automatically on push to `main`, version tags, and pull requests.
-- **omero-nfs-export** -- built on manual dispatch (`workflow_dispatch`).
+- **omero-server-extended** -- [`build-omero-server-image.yml`](.github/workflows/build-omero-server-image.yml)
+- **omero-nfs-export** -- [`build-omero-nfs-export-image.yml`](.github/workflows/build-omero-nfs-export-image.yml)
 
 See [`omero-server-extended/README.md`](omero-server-extended/README.md).
 See [`omero-nfs-export/README.md`](omero-nfs-export/README.md).
