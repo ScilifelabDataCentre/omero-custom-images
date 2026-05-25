@@ -2,8 +2,9 @@ FROM openmicroscopy/omero-server:5.6.16
 
 USER root
 
-RUN dnf -y install epel-release && \
-    dnf -y --disablerepo=pgdg13 install jq curl-minimal ca-certificates && \
+RUN dnf config-manager --disable pgdg13 && \
+    dnf -y install epel-release && \
+    dnf -y install jq curl-minimal ca-certificates && \
     dnf -y clean all && rm -rf /var/cache
 
 RUN . /opt/omero/server/venv3/bin/activate && \
