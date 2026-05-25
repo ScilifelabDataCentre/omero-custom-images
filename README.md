@@ -34,3 +34,9 @@ Each image has its own GitHub Actions workflow, triggered manually via `workflow
 
 See [`omero-server-extended/README.md`](omero-server-extended/README.md).
 See [`omero-nfs-export/README.md`](omero-nfs-export/README.md).
+
+## Contact
+
+The SciLifeLab OMERO prototype is being developed by the SciLifeLab Data Centre. This service is supported by SciLifeLab and the Knut and Alice Wallenberg foundation through the Data-Driven Life Science (DDLS) program, as well as by the Swedish Foundation for Strategic Research (SSF).
+
+Please contact the development team for SciLifeLab OMERO with any questions at *omero@scilifelab.se*.
