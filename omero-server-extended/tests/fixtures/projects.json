@@ -1,0 +1,17 @@
+{
+  "exported_at": "2026-11-12T13:00:05+00:00",
+  "projects": [
+    {"name": "Lab A", "project_id": 1, "allocation_GB": 50,
+     "status": "deactivated", "end_date": "2026-10-01", "last_updated": "2026-10-01 10:00:00"},
+    {"name": "Lab A", "project_id": 2, "allocation_GB": 100,
+     "status": "started", "end_date": "2027-09-01", "last_updated": "2026-09-01 10:00:00"},
+    {"name": "Lab B", "project_id": 3, "allocation_GB": 50,
+     "status": "started", "end_date": "2027-01-01", "last_updated": "2026-01-01 10:00:00"},
+    {"name": "lab b", "project_id": 4, "allocation_GB": 80,
+     "status": "extended", "end_date": "2027-06-01", "last_updated": "2026-06-01 10:00:00"},
+    {"name": "NOR Demo Lab", "project_id": 7, "allocation_GB": 2,
+     "status": "started", "end_date": "2027-11-01", "last_updated": "2026-11-01 10:00:00"},
+    {"name": "OMEROTEST 2024/10", "project_id": 1234, "allocation_GB": 100,
+     "status": "active", "end_date": "2027-10-31", "last_updated": "2026-11-12 13:00:01"}
+  ]
+}
