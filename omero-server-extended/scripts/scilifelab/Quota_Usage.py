@@ -2,15 +2,15 @@
 
 This file has three layers:
 - the data chain (pick_project, folder_bytes, member_usage, collect_quota) that
-  reads the suprpy database and the group folder;
+  reads the suprpy projects snapshot and the group folder;
 - pure chart functions (build_slices, build_title, render_pie_png);
 - the OMERO script shell, added later, which imports omero only when run
   inside OMERO.
 Everything except the shell is tested locally with pytest and needs only Pillow.
 """
 
+import json
 import os
-import sqlite3
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -20,8 +20,9 @@ SMALL_SLICE_FRACTION = 0.02  # member slices below 2% of the pie go into "Others
 NEARLY_FULL_PERCENT = 90
 INACTIVE_STATUSES = ("ended", "deactivated")
 
-# Where the omeroserver pod sees the data (set in ddls-k8s-gitops).
-DB_PATH = "/data/local_projects/local_projects.db"  # suprpy database, mounted read-only
+# Where omeroworker-0 (Processor-0) sees the data over the omero-nfs mount.
+# The hourly suprpy job exports its projects table here (ddls-k8s-gitops).
+SNAPSHOT_PATH = "/OMERO/.quota/projects.json"
 REPO_ROOT = "/OMERO/ManagedRepository"  # one folder per group, XFS project quota on each
 CHART_NAMESPACE = "se.scilifelab.omero.quota"
 
@@ -47,7 +48,7 @@ class QuotaError(Exception):
     """A problem the user should read about, e.g. no quota row for this group."""
 
 
-# ---------- data chain: database + group folder -> chart input ----------
+# ---------- data chain: projects snapshot + group folder -> chart input ----------
 
 
 def group_dir_name(project_name):
@@ -55,29 +56,28 @@ def group_dir_name(project_name):
     return project_name.lower().replace(" ", "_").replace("/", "_")
 
 
-def pick_project(db_path, group_name, timeout=5):
-    """Return {name, status, allocation_gb} of the group's row in suprpy's database, or None.
+def pick_project(snapshot_path, group_name):
+    """Return {name, status, allocation_gb} of the group's row in the snapshot, or None.
 
-    Opens the database read-only, so a wrong path fails instead of creating a file.
-    If several rows map to the group, prefer rows that are not deactivated, then
-    the most recently updated one.
+    The snapshot is {"exported_at": ..., "projects": [row, ...]}, one row per
+    suprpy project. If several rows map to the group, prefer rows that are not
+    deactivated, then the most recently updated one.
     """
-    uri = Path(db_path).resolve().as_uri() + "?mode=ro"
-    con = sqlite3.connect(uri, uri=True, timeout=timeout)
-    try:
-        rows = con.execute(
-            "SELECT name, status, allocation_GB, last_updated FROM projects"
-        ).fetchall()
-    finally:
-        con.close()
+    with open(snapshot_path, encoding="utf-8") as f:
+        rows = json.load(f)["projects"]
 
-    matches = [row for row in rows if row[0] and group_dir_name(row[0]) == group_name]
+    matches = [row for row in rows if row["name"] and group_dir_name(row["name"]) == group_name]
     if not matches:
         return None
-    name, status, allocation_gb, _ = max(
-        matches, key=lambda row: (row[1] != "deactivated", row[3] or "")
+    row = max(
+        matches,
+        key=lambda row: (row.get("status") != "deactivated", row.get("last_updated") or ""),
     )
-    return {"name": name, "status": status, "allocation_gb": allocation_gb}
+    return {
+        "name": row["name"],
+        "status": row.get("status"),
+        "allocation_gb": row.get("allocation_GB"),
+    }
 
 
 def quota_from_statvfs(stat):
@@ -146,14 +146,17 @@ def member_labels(users):
     }
 
 
-def collect_quota(db_path, repo_root, group_name, members, statvfs=os.statvfs):
+def collect_quota(snapshot_path, repo_root, group_name, members, statvfs=os.statvfs):
     """Return (slices, title) for one group, or raise QuotaError with a clear message."""
     try:
-        project = pick_project(db_path, group_name)
-    except sqlite3.Error as exc:
-        raise QuotaError(f"Cannot read the project database {db_path}: {exc}") from exc
+        project = pick_project(snapshot_path, group_name)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        # Missing, unreadable for the omero user, not JSON, or not the expected shape.
+        raise QuotaError(f"Cannot read the quota snapshot {snapshot_path}: {exc!r}") from exc
     if project is None:
-        raise QuotaError(f"No quota found for group '{group_name}' in the project database.")
+        raise QuotaError(
+            f"No quota found for group '{group_name}' in the quota snapshot {snapshot_path}."
+        )
     group_dir = Path(repo_root) / group_name
     if not group_dir.is_dir():
         raise QuotaError(f"The data folder for group '{group_name}' does not exist: {group_dir}")
@@ -275,7 +278,7 @@ def make_chart(conn):
     owners, members = group.groupSummary()
     group_name = group.getName()
     slices, title = collect_quota(
-        DB_PATH, REPO_ROOT, group_name, member_labels(list(owners) + list(members))
+        SNAPSHOT_PATH, REPO_ROOT, group_name, member_labels(list(owners) + list(members))
     )
 
     # Keep one chart per user and group: remove the user's earlier charts first.

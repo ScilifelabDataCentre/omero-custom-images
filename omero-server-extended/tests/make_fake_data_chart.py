@@ -1,7 +1,7 @@
 """Run the whole data chain on fake data and draw quota_fake_data.png (NOR-803, M3).
 
 Builds, in a temporary folder that is deleted afterwards:
-- a fake suprpy database (local_projects.db) with two rows for one group;
+- a fake suprpy projects snapshot (projects.json) with two rows for one group;
 - a fake ManagedRepository/<group>/<userId>/ tree with real bytes in it.
 The folder limit is faked at 1 GiB while suprpy says 2 GB, so the title
 must show "quota change pending".
@@ -9,8 +9,8 @@ must show "quota change pending".
 Run from omero-server-extended/:  python tests/make_fake_data_chart.py
 """
 
+import json
 import os
-import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -35,24 +35,23 @@ def write_file(path, size):
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
 
-    # 1. Fake suprpy database: an old deactivated row and the current row.
-    db = tmp / "local_projects.db"
-    con = sqlite3.connect(db)
-    con.execute(
-        "CREATE TABLE projects (project_id INTEGER PRIMARY KEY, name TEXT,"
-        " allocation_GB INTEGER, status TEXT, last_updated DATETIME,"
-        " last_synchronized_storage_quota DATETIME)"
+    # 1. Fake suprpy snapshot: an old deactivated row and the current row.
+    snapshot = tmp / "projects.json"
+    snapshot.write_text(
+        json.dumps(
+            {
+                "exported_at": "2026-11-12T13:00:05+00:00",
+                "projects": [
+                    {"name": "NOR Demo Lab", "project_id": 6, "allocation_GB": 5,
+                     "status": "deactivated", "end_date": "2026-11-04",
+                     "last_updated": "2026-11-04 09:00:00"},
+                    {"name": "NOR Demo Lab", "project_id": 7, "allocation_GB": 2,
+                     "status": "started", "end_date": "2027-11-01",
+                     "last_updated": "2026-11-01 10:00:00"},
+                ],
+            }
+        )
     )
-    con.executemany(
-        "INSERT INTO projects (project_id, name, allocation_GB, status, last_updated)"
-        " VALUES (?, ?, ?, ?, ?)",
-        [
-            (6, "NOR Demo Lab", 5, "deactivated", "2026-11-04 09:00:00"),
-            (7, "NOR Demo Lab", 2, "started", "2026-11-01 10:00:00"),
-        ],
-    )
-    con.commit()
-    con.close()
 
     # 2. Fake ManagedRepository/<group>/<userId>/... with real data.
     group = qu.group_dir_name("NOR Demo Lab")  # -> "nor_demo_lab"
@@ -74,7 +73,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # 4. The real chain, then the chart.
     members = {2: "Alice Andersson", 3: "Bo Berg", 4: "Cecilia Carlsson"}
     slices, title = qu.collect_quota(
-        db, tmp / "ManagedRepository", group, members, statvfs=statvfs
+        snapshot, tmp / "ManagedRepository", group, members, statvfs=statvfs
     )
 
 out = Path(__file__).resolve().parent / "quota_fake_data.png"

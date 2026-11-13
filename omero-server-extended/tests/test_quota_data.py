@@ -1,11 +1,12 @@
-"""Tests for the data chain in scripts/scilifelab/Quota_Usage.py (NOR-803, M3).
+"""Tests for the data chain in scripts/scilifelab/Quota_Usage.py (NOR-803).
 
-Everything here runs on fake data: a small SQLite file shaped like suprpy's
-`projects` table and a fake ManagedRepository folder in pytest's tmp_path.
+Everything here runs on fake data: fixture snapshots in tests/fixtures/ shaped
+like the projects.json the suprpy job exports, and a fake ManagedRepository
+folder in pytest's tmp_path.
 """
 
 import os
-import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -15,22 +16,8 @@ import Quota_Usage as qu
 GIB = 1024**3
 MIB = 1024**2
 
-
-def make_db(path, rows):
-    """Create a fake suprpy database. rows: (project_id, name, allocation_GB, status, last_updated)."""
-    con = sqlite3.connect(path)
-    con.execute(
-        "CREATE TABLE projects (project_id INTEGER PRIMARY KEY, name TEXT,"
-        " allocation_GB INTEGER, status TEXT, last_updated DATETIME,"
-        " last_synchronized_storage_quota DATETIME)"
-    )
-    con.executemany(
-        "INSERT INTO projects (project_id, name, allocation_GB, status, last_updated)"
-        " VALUES (?, ?, ?, ?, ?)",
-        rows,
-    )
-    con.commit()
-    con.close()
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+SNAPSHOT = FIXTURES / "projects.json"
 
 
 def write_file(path, size):
@@ -54,47 +41,28 @@ def test_group_dir_name_matches_suprpy():
     assert qu.group_dir_name("NOR Demo Lab/Imaging") == "nor_demo_lab_imaging"
 
 
-# ---------- pick_project: which database row belongs to the group ----------
+# ---------- pick_project: which snapshot row belongs to the group ----------
 
 
-def test_pick_project_prefers_a_row_that_is_not_deactivated(tmp_path):
-    db = tmp_path / "local_projects.db"
-    make_db(
-        db,
-        [
-            (1, "Lab A", 50, "deactivated", "2026-10-01 10:00:00"),  # newer, but deactivated
-            (2, "Lab A", 100, "started", "2026-09-01 10:00:00"),
-        ],
-    )
-    project = qu.pick_project(db, "lab_a")
+def test_pick_project_prefers_a_row_that_is_not_deactivated():
+    # "Lab A" has a newer deactivated row and an older started row.
+    project = qu.pick_project(SNAPSHOT, "lab_a")
     assert project["allocation_gb"] == 100
     assert project["status"] == "started"
 
 
-def test_pick_project_prefers_the_newest_active_row(tmp_path):
-    db = tmp_path / "local_projects.db"
-    make_db(
-        db,
-        [
-            (1, "Lab A", 50, "started", "2026-01-01 10:00:00"),
-            (2, "lab a", 80, "extended", "2026-06-01 10:00:00"),  # same folder name
-        ],
-    )
-    assert qu.pick_project(db, "lab_a")["allocation_gb"] == 80
+def test_pick_project_prefers_the_newest_active_row():
+    # "Lab B" and "lab b" map to the same folder; the newer row wins.
+    assert qu.pick_project(SNAPSHOT, "lab_b")["allocation_gb"] == 80
 
 
-def test_pick_project_returns_none_when_no_row_matches(tmp_path):
-    db = tmp_path / "local_projects.db"
-    make_db(db, [(1, "Lab A", 50, "started", "2026-01-01 10:00:00")])
-    assert qu.pick_project(db, "lab_b") is None
+def test_pick_project_converts_spaces_and_slashes():
+    project = qu.pick_project(SNAPSHOT, "omerotest_2024_10")
+    assert project["name"] == "OMEROTEST 2024/10"
 
 
-def test_pick_project_never_creates_a_missing_database(tmp_path):
-    # Read-only mode: a wrong path must fail, not silently create an empty file.
-    db = tmp_path / "missing.db"
-    with pytest.raises(sqlite3.OperationalError):
-        qu.pick_project(db, "lab_a")
-    assert not db.exists()
+def test_pick_project_returns_none_when_no_row_matches():
+    assert qu.pick_project(SNAPSHOT, "lab_z") is None
 
 
 # ---------- quota_from_statvfs: limit and usage of the group folder ----------
@@ -168,18 +136,16 @@ def test_at_most_8_member_slices_rest_go_into_others():
     assert slices[-1] == ("Others", 12 * GIB + 11 * GIB)
 
 
-# ---------- collect_quota: the whole chain, database + folders -> chart input ----------
+# ---------- collect_quota: the whole chain, snapshot + folders -> chart input ----------
 
 
 def test_collect_quota_runs_the_whole_chain(tmp_path):
-    db = tmp_path / "local_projects.db"
-    make_db(db, [(7, "NOR Demo Lab", 2, "started", "2026-11-01 10:00:00")])
     repo = tmp_path / "ManagedRepository"
     write_file(repo / "nor_demo_lab" / "2" / "a.tif", 1 * MIB)
     used = qu.folder_bytes(repo / "nor_demo_lab")
 
     slices, title = qu.collect_quota(
-        db, repo, "nor_demo_lab", {2: "Alice"}, statvfs=fake_statvfs(10 * MIB, used)
+        SNAPSHOT, repo, "nor_demo_lab", {2: "Alice"}, statvfs=fake_statvfs(10 * MIB, used)
     )
 
     labels = [label for label, _ in slices]
@@ -190,20 +156,16 @@ def test_collect_quota_runs_the_whole_chain(tmp_path):
     assert "quota change pending" in title
 
 
-def test_collect_quota_explains_a_missing_database_row(tmp_path):
-    db = tmp_path / "local_projects.db"
-    make_db(db, [(7, "Other Lab", 2, "started", "2026-11-01 10:00:00")])
-    (tmp_path / "ManagedRepository" / "nor_demo_lab").mkdir(parents=True)
-    with pytest.raises(qu.QuotaError, match="nor_demo_lab"):
-        qu.collect_quota(db, tmp_path / "ManagedRepository", "nor_demo_lab", {})
+def test_collect_quota_explains_a_missing_snapshot_row(tmp_path):
+    (tmp_path / "ManagedRepository" / "lab_z").mkdir(parents=True)
+    with pytest.raises(qu.QuotaError, match="No quota found for group 'lab_z'"):
+        qu.collect_quota(SNAPSHOT, tmp_path / "ManagedRepository", "lab_z", {})
 
 
 def test_collect_quota_explains_a_missing_group_folder(tmp_path):
-    db = tmp_path / "local_projects.db"
-    make_db(db, [(7, "NOR Demo Lab", 2, "started", "2026-11-01 10:00:00")])
     (tmp_path / "ManagedRepository").mkdir()
     with pytest.raises(qu.QuotaError, match="folder"):
-        qu.collect_quota(db, tmp_path / "ManagedRepository", "nor_demo_lab", {})
+        qu.collect_quota(SNAPSHOT, tmp_path / "ManagedRepository", "nor_demo_lab", {})
 
 
 # ---------- member_labels: OMERO users -> pie chart labels ----------
@@ -231,10 +193,33 @@ def test_member_labels_falls_back_to_username_without_full_name():
     assert qu.member_labels([fake_user(2, " ", "alice")]) == {2: "alice"}
 
 
-def test_collect_quota_explains_an_unreadable_database(tmp_path):
-    # E.g. the suprpy volume is not mounted: say so instead of a traceback.
+# ---------- collect_quota: a snapshot that cannot be used gives a clear message ----------
+
+
+def test_collect_quota_explains_a_missing_snapshot(tmp_path):
+    # E.g. the suprpy job has not run yet: say so instead of a traceback.
     (tmp_path / "ManagedRepository" / "nor_demo_lab").mkdir(parents=True)
-    with pytest.raises(qu.QuotaError, match="database"):
+    with pytest.raises(qu.QuotaError, match="Cannot read the quota snapshot"):
         qu.collect_quota(
-            tmp_path / "missing.db", tmp_path / "ManagedRepository", "nor_demo_lab", {}
+            tmp_path / "missing.json", tmp_path / "ManagedRepository", "nor_demo_lab", {}
+        )
+
+
+def test_collect_quota_explains_a_snapshot_that_is_not_json(tmp_path):
+    # E.g. a file cut off half-way.
+    snapshot = tmp_path / "projects.json"
+    snapshot.write_text('{"exported_at": "2026-11-12T13:00:05+00:00", "projects": [')
+    (tmp_path / "ManagedRepository" / "nor_demo_lab").mkdir(parents=True)
+    with pytest.raises(qu.QuotaError, match="Cannot read the quota snapshot"):
+        qu.collect_quota(snapshot, tmp_path / "ManagedRepository", "nor_demo_lab", {})
+
+
+def test_collect_quota_explains_a_snapshot_with_the_wrong_shape(tmp_path):
+    (tmp_path / "ManagedRepository" / "nor_demo_lab").mkdir(parents=True)
+    with pytest.raises(qu.QuotaError, match="Cannot read the quota snapshot"):
+        qu.collect_quota(
+            FIXTURES / "projects_bad_shape.json",
+            tmp_path / "ManagedRepository",
+            "nor_demo_lab",
+            {},
         )
