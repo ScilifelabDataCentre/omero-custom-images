@@ -87,13 +87,15 @@ def quota_from_statvfs(stat):
     return used, limit
 
 
-def folder_bytes(path):
+def folder_bytes(path, seen=None):
     """Disk space really allocated under path (like `du`): st_blocks, not file length.
 
     Symlinks are not followed and a hard-linked file is counted once,
-    which is also how XFS quota counts.
+    which is also how XFS quota counts. Pass `seen` to share inode tracking
+    with another folder scan.
     """
-    seen = set()
+    if seen is None:
+        seen = set()
     total = 0
     paths = [path]
     for root, dirs, files in os.walk(path):  # os.walk does not enter symlinked folders
@@ -118,12 +120,18 @@ def member_usage(group_dir, members):
     left out here; build_slices shows them as "Other".
     """
     usage = {}
-    for entry in os.scandir(group_dir):
+    member_dirs = [
+        entry
+        for entry in os.scandir(group_dir)
+        if entry.is_dir(follow_symlinks=False) and entry.name.isascii() and entry.name.isdigit()
+    ]
+    member_dirs.sort(key=lambda entry: (int(entry.name), entry.name))
+    seen = set()
+    for entry in member_dirs:
         name = entry.name
-        if entry.is_dir(follow_symlinks=False) and name.isascii() and name.isdigit():
-            user_id = int(name)
-            label = members.get(user_id, f"Former user {user_id}")
-            usage[label] = usage.get(label, 0) + folder_bytes(entry.path)
+        user_id = int(name)
+        label = members.get(user_id, f"Former user {user_id}")
+        usage[label] = usage.get(label, 0) + folder_bytes(entry.path, seen)
     return usage
 
 

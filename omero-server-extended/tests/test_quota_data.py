@@ -123,6 +123,24 @@ def test_member_usage_labels_members_and_former_users(tmp_path):
     assert all(size > 0 for size in usage.values())
 
 
+def test_member_usage_counts_cross_member_hard_link_for_lowest_user_id(tmp_path):
+    group_dir = tmp_path / "lab_a"
+    first = group_dir / "2" / "shared.tif"
+    write_file(first, 1 * MIB)
+    second = group_dir / "10" / "shared.tif"
+    second.parent.mkdir(parents=True)
+    os.link(first, second)
+
+    first_usage = qu.folder_bytes(first.parent)
+    second_usage = qu.folder_bytes(second.parent)
+    shared_bytes = first.stat().st_blocks * 512
+    usage = qu.member_usage(group_dir, {2: "Alice", 10: "Bob"})
+
+    assert usage["Alice"] == first_usage
+    assert usage["Bob"] == second_usage - shared_bytes
+    assert sum(usage.values()) == first_usage + second_usage - shared_bytes
+
+
 # ---------- build_slices: at most 8 member colours ----------
 
 
