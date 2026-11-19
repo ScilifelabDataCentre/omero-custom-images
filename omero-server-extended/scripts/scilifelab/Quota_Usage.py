@@ -281,13 +281,11 @@ def make_chart(conn):
         SNAPSHOT_PATH, REPO_ROOT, group_name, member_labels(list(owners) + list(members))
     )
 
-    # Keep one chart per user and group: remove the user's earlier charts first.
+    # Collect earlier charts, but preserve them until the replacement exists.
     old = conn.getObjects(
         "FileAnnotation", attributes={"ns": CHART_NAMESPACE}, opts={"owner": conn.getUserId()}
     )
     old_ids = [ann.getId() for ann in old]
-    if old_ids:
-        conn.deleteObjects("Annotation", old_ids, wait=True)
 
     with tempfile.TemporaryDirectory() as tmp:
         png = os.path.join(tmp, f"quota_{group_name}.png")
@@ -295,6 +293,8 @@ def make_chart(conn):
         file_ann = conn.createFileAnnfromLocalFile(
             png, mimetype="image/png", ns=CHART_NAMESPACE, desc=title
         )
+    if old_ids:
+        conn.deleteObjects("Annotation", old_ids, wait=True)
     return f"{group_name}: {title}", file_ann
 
 
