@@ -11,8 +11,9 @@ RUN dnf config-manager --disable pgdg13 && \
 RUN . /opt/omero/server/venv3/bin/activate && \
     pip install --no-cache-dir omero-metadata \
         "pillow>=13.0.0" "certifi>=2026.10.18" "urllib3>=2.8.0" \
-        "msgpack>=1.2.3" "setuptools>=78.1.1" && \
-    pip check
+        "msgpack>=1.2.3" "setuptools>=78.1.1,<81" && \
+    pip check && \
+    python -c "import pkg_resources, omego.main"
 
 
 COPY scripts/  /opt/omero/server/OMERO.server-5.6.16-ice36/lib/scripts/omero/
