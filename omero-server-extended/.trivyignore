@@ -3,3 +3,6 @@
 CVE-2022-22965
 CVE-2022-22978
 
+# No Docker HEALTHCHECK; liveness/readiness are Kubernetes probes
+DS-0026
+
